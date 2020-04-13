@@ -1,7 +1,6 @@
 from __future__ import absolute_import
 
 import json
-import math
 import os
 import requests
 import warnings
@@ -38,6 +37,7 @@ class GoogleMapPlotter(object):
         self.points = []
         self.circles = []
         self.symbols = []
+        self.icons = []
         self.heatmap_points = []
         self.ground_overlays = []
         self.radpoints = []
@@ -45,6 +45,14 @@ class GoogleMapPlotter(object):
         self.coloricon = os.path.join(os.path.dirname(__file__), 'markers/%s.png')
         self.color_dict = mpl_color_map
         self.html_color_codes = html_color_codes
+        self.custom_icons = {}
+
+    def add_icon_file(self, name, icon_file):
+        if name in self.custom_icons:
+            raise ValueError('Icon %s already exists' % name)
+        if not os.path.exists(icon_file):
+            raise FileNotFoundError('File %s not found' % icon_file)
+        self.custom_icons[name] = icon_file
 
     @classmethod
     def from_geocode(cls, location_string, zoom=13):
@@ -58,6 +66,11 @@ class GoogleMapPlotter(object):
         geocode = json.loads(geocode.text)
         latlng_dict = geocode['results'][0]['geometry']['location']
         return latlng_dict['lat'], latlng_dict['lng']
+
+    def icon(self, lat, lng, icon_name):
+        if icon_name not in self.custom_icons:
+            raise ValueError('Icon %s not exists, please add it by add_icon_file first.' % icon_name)
+        self.icons.append((icon_name, lat, lng))
 
     def grid(self, slat, elat, latin, slng, elng, lngin):
         self.gridsetting = [slat, elat, latin, slng, elng, lngin]
@@ -225,7 +238,7 @@ class GoogleMapPlotter(object):
         shape = zip(lats, lngs)
         self.shapes.append((shape, settings))
 
-    def draw(self, htmlfile):
+    def draw(self, htmlfile, language=None):
         """Create the html file which include one google map and all points and paths. If 
         no string is provided, return the raw html.
         """
@@ -237,13 +250,16 @@ class GoogleMapPlotter(object):
         f.write(
             '<meta http-equiv="content-type" content="text/html; charset=UTF-8"/>\n')
         f.write('<title>Google Maps - gmplot </title>\n')
-        if self.apikey:
-            f.write('<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?libraries=visualization&sensor=true_or_false&key=%s"></script>\n' % self.apikey )
-        else:
-            f.write('<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?libraries=visualization&sensor=true_or_false"></script>\n' )
+
+        apikey_str = '&key=%s' % self.apikey if self.apikey else ''
+        lang_str = '&language=%s' % language if language else ''
+        f.write('<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?')
+        f.write('libraries=visualization&sensor=true_or_false%s%s"></script>\n' % (apikey_str, lang_str))
+
         f.write('<script type="text/javascript">\n')
         f.write('\tfunction initialize() {\n')
         self.write_map(f)
+        self.write_icons(f)
         self.write_grids(f)
         self.write_points(f)
         self.write_paths(f)
@@ -266,6 +282,16 @@ class GoogleMapPlotter(object):
     #############################################
     # # # # # # Low level Map Drawing # # # # # #
     #############################################
+
+    def write_icons(self, f):
+        for icon_name, lat, lng in self.icons:
+            f.write((
+                'var marker = new google.maps.Marker({\n'
+                '\tposition: new google.maps.LatLng(%f, %f),\n'
+                '\ticon: \'%s\',\n'
+                '\tmap: map\n'
+                '});\n'
+            ) % (lat, lng, self.custom_icons[icon_name]))
 
     def write_grids(self, f):
         if self.gridsetting is None:
@@ -327,9 +353,9 @@ class GoogleMapPlotter(object):
             '\t\tvar map = new google.maps.Map(document.getElementById("map_canvas"), myOptions);\n')
         f.write('\n')
 
-    def write_point(self, f, lat, lon, color, title):
+    def write_point(self, f, lat, lng, color, title):
         f.write('\t\tvar latlng = new google.maps.LatLng(%f, %f);\n' %
-                (lat, lon))
+                (lat, lng))
         f.write('\t\tvar img = new google.maps.MarkerImage(\'%s\');\n' %
                 (self.coloricon % color))
         f.write('\t\tvar marker = new google.maps.Marker({\n')
@@ -447,6 +473,7 @@ class GoogleMapPlotter(object):
             f.write("'" + url + "'," + '\n')
             f.write('imageBounds);' + '\n')
             f.write('groundOverlay.setMap(map);' + '\n')
+
 
 if __name__ == "__main__":
 
